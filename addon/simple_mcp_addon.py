@@ -13,6 +13,8 @@ import socket
 import threading
 import json
 import time
+import io
+import contextlib
 
 # Global variables
 socket_server = None
@@ -67,7 +69,7 @@ class SimpleMCPServer:
             
             # Read data in chunks until we get complete message
             while True:
-                try:
+                
                     data = client_socket.recv(1024)
                     if not data:
                         break
@@ -82,37 +84,25 @@ class SimpleMCPServer:
                         print(f"Complete JSON received: {json_data}")
                         
                         # Process the message
-                        self.process_message(json_data)
-                        
-                        # Send response
-                        response = json.dumps({"status": "received", "message": "Code processed successfully"})
-                        client_socket.send(response.encode('utf-8'))
-                        print(f"Response sent: {response}")
+                        response = self.process_message(json_data)
+                        client_socket.send((json.dumps(response) + "\n").encode('utf-8'))
+                        print("Response sent to client")
                         break
                         
                     except json.JSONDecodeError:
                         # Not complete JSON yet, continue reading
                         continue
                         
-                except socket.timeout:
-                    print("Client socket timeout")
-                    break
-                except socket.error as e:
-                    print(f"Socket receive error: {e}")
-                    break
+                
 
         except Exception as e:
-            print(f"Client handling error: {e}")
+            error_response = {"status": "error", "error": str(e)}
             try:
-                error_response = json.dumps({"status": "error", "error": str(e)})
-                client_socket.send(error_response.encode('utf-8'))
+                client_socket.send((json.dumps(error_response) + "\n").encode('utf-8'))
             except:
                 pass
         finally:
-            try:
-                client_socket.close()
-            except:
-                pass
+            client_socket.close()
             print("Client disconnected")
 
     def process_message(self, data):
@@ -124,20 +114,34 @@ class SimpleMCPServer:
         msg_type = data.get('type', 'unknown')
         code = data.get('code', '')
         
-        print(f"Message type: {msg_type}")
-        print(f"Code content: {code}")
         
         # Execute the code if it's a code message
         if msg_type == 'code' and code:
+            print("Executing code...")
+            f=io.StringIO()
             try:
-                print("Executing code...")
-                # Execute in Blender's context
-                exec(code)
-                print("Code executed successfully")
+                with contextlib.redirect_stdout(f):
+                    exec(code, {'bpy': bpy, '__builtins__': __builtins__})
+                output = f.getvalue()
+                print("Code executed successfully:", output)
+
+                return {
+                    "status": "success",
+                    "output": output,
+                    "message": "Code executed successfully",
+                }
             except Exception as e:
                 print(f"Code execution error: {e}")
+                return {
+                    "status": "error",
+                    "error": str(e),
+                    "message": "Code execution error",
+                }
         
-        print("=== END MESSAGE ===")
+        return {
+        "status": "ignored",
+        "message": "Unsupported message type"
+        }
     
     def stop_server(self):
         """Stop the server"""
