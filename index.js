@@ -34,16 +34,14 @@ class BlenderClient {
           timestamp: new Date().toISOString(),
         });
 
-        // Send message and end the writing side
         client.write(message);
-        client.end(); // This closes the write side but keeps reading open
+        client.end();
       });
 
       client.on("data", (data) => {
         buffer += data.toString();
         console.log("Received data from Blender:", data.toString());
 
-        // Try to parse complete JSON response
         try {
           const response = JSON.parse(buffer);
           if (!resolved) {
@@ -52,7 +50,6 @@ class BlenderClient {
             resolve(response);
           }
         } catch (e) {
-          // Not complete JSON yet, keep buffering
           console.log("Incomplete JSON, waiting for more data");
         }
       });
