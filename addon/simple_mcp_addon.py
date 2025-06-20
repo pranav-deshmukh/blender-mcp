@@ -60,38 +60,61 @@ class SimpleMCPServer:
                 self.socket.close()
     
     def handle_client(self, client_socket):
-        """Handle individual client connection"""
+        buffer = ""
         try:
-            while self.running:
-                # Receive data (like socket.on('data') in Node.js)
-                data = client_socket.recv(1024)
-                
-                if not data:
-                    break
-                
-                # Decode the message
-                message = data.decode('utf-8')
-                print(f"Raw message received: {message}")
-                
-                # Try to parse as JSON
+            # Set socket timeout to avoid hanging
+            client_socket.settimeout(10.0)
+            
+            # Read data in chunks until we get complete message
+            while True:
                 try:
-                    json_data = json.loads(message)  # Like JSON.parse() in Node.js
-                    self.process_message(json_data)
-                except json.JSONDecodeError:
-                    # If not JSON, just treat as plain text
-                    print(f"Plain text received: {message}")
-                
-                # Send response back (optional)
-                response = json.dumps({"status": "received"})  # Like JSON.stringify() in Node.js
-                client_socket.send((response + "\n").encode('utf-8'))
+                    data = client_socket.recv(1024)
+                    if not data:
+                        break
+                    
+                    chunk = data.decode('utf-8')
+                    buffer += chunk
+                    print(f"Received chunk: {chunk}")
+                    
+                    # Try to parse as JSON
+                    try:
+                        json_data = json.loads(buffer)
+                        print(f"Complete JSON received: {json_data}")
+                        
+                        # Process the message
+                        self.process_message(json_data)
+                        
+                        # Send response
+                        response = json.dumps({"status": "received", "message": "Code processed successfully"})
+                        client_socket.send(response.encode('utf-8'))
+                        print(f"Response sent: {response}")
+                        break
+                        
+                    except json.JSONDecodeError:
+                        # Not complete JSON yet, continue reading
+                        continue
+                        
+                except socket.timeout:
+                    print("Client socket timeout")
+                    break
+                except socket.error as e:
+                    print(f"Socket receive error: {e}")
+                    break
 
-                
         except Exception as e:
             print(f"Client handling error: {e}")
+            try:
+                error_response = json.dumps({"status": "error", "error": str(e)})
+                client_socket.send(error_response.encode('utf-8'))
+            except:
+                pass
         finally:
-            client_socket.close()
+            try:
+                client_socket.close()
+            except:
+                pass
             print("Client disconnected")
-    
+
     def process_message(self, data):
         """Process the received JSON message"""
         print("=== MCP MESSAGE RECEIVED ===")
@@ -103,10 +126,18 @@ class SimpleMCPServer:
         
         print(f"Message type: {msg_type}")
         print(f"Code content: {code}")
-        print("=== END MESSAGE ===")
         
-        # Here you could add code execution later
-        # For now, just logging
+        # Execute the code if it's a code message
+        if msg_type == 'code' and code:
+            try:
+                print("Executing code...")
+                # Execute in Blender's context
+                exec(code)
+                print("Code executed successfully")
+            except Exception as e:
+                print(f"Code execution error: {e}")
+        
+        print("=== END MESSAGE ===")
     
     def stop_server(self):
         """Stop the server"""

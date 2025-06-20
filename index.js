@@ -8,57 +8,82 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
-// Simple TCP client to connect to Blender
 class BlenderClient {
   host = "localhost";
   port = 8765;
 
   async sendCode(code) {
     return new Promise((resolve, reject) => {
-      // Create TCP connection (connects to your Blender addon)
       const client = net.createConnection(this.port, this.host);
+      let buffer = "";
+      let resolved = false;
+
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          client.destroy();
+          reject(new Error("Timed out waiting for Blender response"));
+        }
+      }, 5000); // Reduced timeout
 
       client.on("connect", () => {
-        console.log("Connected to Blender addon");
-
-        // Send JSON message (same format your Python code expects)
+        console.log("Connected to Blender");
         const message = JSON.stringify({
           type: "code",
           code: code,
           timestamp: new Date().toISOString(),
         });
 
-        console.log("Sending to Blender:", message);
+        // Send message and end the writing side
         client.write(message);
+        client.end(); // This closes the write side but keeps reading open
       });
-
-      let buffer = "";
 
       client.on("data", (data) => {
         buffer += data.toString();
+        console.log("Received data from Blender:", data.toString());
 
-        if (buffer.includes("\n")) {
-          try {
-            const cleanResponse = buffer.trim(); // Remove \n
-            const parsed = JSON.parse(cleanResponse);
-            console.log("Response from Blender:", parsed);
-            resolve(parsed);
-          } catch (err) {
-            console.error("Failed to parse response JSON:", buffer);
-            reject(err);
-          } finally {
-            client.end();
+        // Try to parse complete JSON response
+        try {
+          const response = JSON.parse(buffer);
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            resolve(response);
           }
+        } catch (e) {
+          // Not complete JSON yet, keep buffering
+          console.log("Incomplete JSON, waiting for more data");
         }
       });
 
       client.on("error", (err) => {
-        console.error("Connection error:", err.message);
-        reject(err);
+        console.error("Client error:", err);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          reject(err);
+        }
       });
 
       client.on("close", () => {
-        console.log("Connection to Blender closed");
+        console.log("Connection closed by Blender");
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          if (buffer) {
+            try {
+              const response = JSON.parse(buffer);
+              resolve(response);
+            } catch (e) {
+              reject(
+                new Error(`Connection closed with invalid JSON: ${buffer}`)
+              );
+            }
+          } else {
+            reject(new Error("Connection closed without any response"));
+          }
+        }
       });
     });
   }
@@ -66,7 +91,6 @@ class BlenderClient {
 
 const blenderClient = new BlenderClient();
 
-// MCP tool to send code to Blender
 server.tool(
   "send-code-to-blender",
   {
@@ -80,7 +104,11 @@ server.tool(
         content: [
           {
             type: "text",
-            text: `Code sent to Blender successfully!\n\nSent code:\n${code}\n\nBlender response:\n${response}`,
+            text: `Code sent to Blender successfully!\n\nSent code:\n${code}\n\nBlender response:\n${JSON.stringify(
+              response,
+              null,
+              2
+            )}`,
           },
         ],
       };
@@ -99,7 +127,6 @@ server.tool(
   }
 );
 
-// Test connection tool
 server.tool("test-blender-connection", {}, async () => {
   try {
     const response = await blenderClient.sendCode('print("Hello from MCP!")');
@@ -107,7 +134,11 @@ server.tool("test-blender-connection", {}, async () => {
       content: [
         {
           type: "text",
-          text: `Connection test successful! Blender response: ${response}`,
+          text: `Connection test successful! Blender response: ${JSON.stringify(
+            response,
+            null,
+            2
+          )}`,
         },
       ],
     };
