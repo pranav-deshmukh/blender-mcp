@@ -12,7 +12,7 @@ class BlenderClient {
   host = "localhost";
   port = 8765;
 
-  async sendCode(code) {
+  async sendMessage(messageObject) {
     return new Promise((resolve, reject) => {
       const client = net.createConnection(this.port, this.host);
       let buffer = "";
@@ -28,11 +28,7 @@ class BlenderClient {
 
       client.on("connect", () => {
         console.log("Connected to Blender");
-        const message = JSON.stringify({
-          type: "code",
-          code: code,
-          timestamp: new Date().toISOString(),
-        });
+        const message = JSON.stringify(messageObject);
 
         client.write(message);
         client.end();
@@ -83,6 +79,22 @@ class BlenderClient {
         }
       });
     });
+  }
+  async sendCode(code) {
+    const messageObject = {
+      type: "code",
+      code: code,
+      timestamp: new Date().toISOString(),
+    };
+    return this.sendMessage(messageObject);
+  }
+
+  async fetchScene() {
+    const messageObject = {
+      type: "fetch-scene",
+      timestamp: new Date().toISOString(),
+    };
+    return this.sendMessage(messageObject);
   }
 }
 
@@ -145,6 +157,37 @@ server.tool("test-blender-connection", {}, async () => {
         {
           type: "text",
           text: `Connection test failed: ${
+            error instanceof Error ? error.message : "Unknown error"
+          }`,
+        },
+      ],
+    };
+  }
+});
+
+server.tool("fetch-scene-from-blender", {}, async () => {
+  try {
+    console.log("Fetching scene from Blender...");
+    const response = await blenderClient.fetchScene();
+
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Scene fetched from Blender:\n${JSON.stringify(
+            response,
+            null,
+            2
+          )}`,
+        },
+      ],
+    };
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Failed to fetch scene: ${
             error instanceof Error ? error.message : "Unknown error"
           }`,
         },

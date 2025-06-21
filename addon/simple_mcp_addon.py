@@ -19,6 +19,22 @@ from contextlib import redirect_stdout, suppress
 socket_server = None
 server_running = False
 
+def getSceneInfo():
+        sceneInfo = {
+            "scene_name":bpy.context.scene.name,
+            "objects":[],
+        }
+
+        for obj in bpy.context.scene.objects:
+            obj_info = {
+                "name": obj.name,
+                "type": obj.type,
+                "location": list(obj.location),
+                "dimensions": list(obj.dimensions),
+            }
+            sceneInfo["objects"].append(obj_info)
+        return sceneInfo;
+
 class SimpleMCPServer:
     def __init__(self, port=8765):
         self.port = port
@@ -93,6 +109,8 @@ class SimpleMCPServer:
         finally:
             client_socket.close()
             print("Client disconnected")
+    
+
 
     def process_message(self, data):
         """Process the received JSON message"""
@@ -100,10 +118,10 @@ class SimpleMCPServer:
         print(f"Full message: {data}")
         
         msg_type = data.get('type', 'unknown')
-        code = data.get('code', '')
         
         
-        if msg_type == 'code' and code:
+        if msg_type == 'code':
+            code = data.get('code', '')
             print("Executing code...")
             try:
                 exec_result=io.StringIO()
@@ -123,8 +141,20 @@ class SimpleMCPServer:
                     "error": str(e),
                     "message": "Code execution error",
                 }
-        
-        
+        elif msg_type == 'fetch-scene':
+            try:
+                info = getSceneInfo()
+                return{
+                    "status": "success",
+                    "result": info,
+                }
+            except Exception as e:
+                print(f"Scene fetch error: {e}")
+                return {
+                    "status": "error",
+                    "error": str(e),
+                }
+
     
     def stop_server(self):
         """Stop the server"""
