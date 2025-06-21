@@ -14,9 +14,8 @@ import threading
 import json
 import time
 import io
-import contextlib
+from contextlib import redirect_stdout, suppress
 
-# Global variables
 socket_server = None
 server_running = False
 
@@ -29,29 +28,24 @@ class SimpleMCPServer:
     def start_server(self):
         """Start the TCP server"""
         try:
-            # Create socket (like net.createServer() in Node.js)
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             
-            # Bind to localhost:8765 (like server.listen(8765) in Node.js)
             self.socket.bind(('localhost', self.port))
             self.socket.listen(1)
             
             self.running = True
             print(f"MCP Server started on port {self.port}")
             
-            # Keep accepting connections
             while self.running:
                 try:
-                    # Accept connection (like server.on('connection') in Node.js)
                     client_socket, address = self.socket.accept()
                     print(f"Client connected from {address}")
                     
-                    # Handle this client
                     self.handle_client(client_socket)
                     
                 except socket.error as e:
-                    if self.running:  # Only print error if we're supposed to be running
+                    if self.running:  
                         print(f"Socket error: {e}")
                     break
                     
@@ -64,10 +58,8 @@ class SimpleMCPServer:
     def handle_client(self, client_socket):
         buffer = ""
         try:
-            # Set socket timeout to avoid hanging
             client_socket.settimeout(10.0)
             
-            # Read data in chunks until we get complete message
             while True:
                 
                     data = client_socket.recv(1024)
@@ -78,19 +70,16 @@ class SimpleMCPServer:
                     buffer += chunk
                     print(f"Received chunk: {chunk}")
                     
-                    # Try to parse as JSON
                     try:
                         json_data = json.loads(buffer)
                         print(f"Complete JSON received: {json_data}")
                         
-                        # Process the message
                         response = self.process_message(json_data)
                         client_socket.send((json.dumps(response) + "\n").encode('utf-8'))
                         print("Response sent to client")
                         break
                         
                     except json.JSONDecodeError:
-                        # Not complete JSON yet, continue reading
                         continue
                         
                 
@@ -110,25 +99,22 @@ class SimpleMCPServer:
         print("=== MCP MESSAGE RECEIVED ===")
         print(f"Full message: {data}")
         
-        # Extract message type and code
         msg_type = data.get('type', 'unknown')
         code = data.get('code', '')
         
         
-        # Execute the code if it's a code message
         if msg_type == 'code' and code:
             print("Executing code...")
-            f=io.StringIO()
             try:
-                with contextlib.redirect_stdout(f):
-                    exec(code, {'bpy': bpy, '__builtins__': __builtins__})
-                output = f.getvalue()
+                exec_result=io.StringIO()
+                with redirect_stdout(exec_result):
+                    exec(code, {"bpy": bpy})
+                output = exec_result.getvalue()
                 print("Code executed successfully:", output)
 
                 return {
-                    "status": "success",
-                    "output": output,
-                    "message": "Code executed successfully",
+                    "status": "executed",
+                    "result": output,
                 }
             except Exception as e:
                 print(f"Code execution error: {e}")
@@ -138,10 +124,7 @@ class SimpleMCPServer:
                     "message": "Code execution error",
                 }
         
-        return {
-        "status": "ignored",
-        "message": "Unsupported message type"
-        }
+        
     
     def stop_server(self):
         """Stop the server"""
@@ -150,7 +133,6 @@ class SimpleMCPServer:
             self.socket.close()
         print("MCP Server stopped")
 
-# Blender UI Classes
 class MCP_OT_StartServer(bpy.types.Operator):
     """Start MCP Server"""
     bl_idname = "mcp.start_server"
@@ -164,12 +146,10 @@ class MCP_OT_StartServer(bpy.types.Operator):
             self.report({'WARNING'}, "Server already running!")
             return {'CANCELLED'}
         
-        # Create and start server
         socket_server = SimpleMCPServer(8765)
         
-        # Start in background thread
         server_thread = threading.Thread(target=socket_server.start_server)
-        server_thread.daemon = True  # Dies when Blender closes
+        server_thread.daemon = True  
         server_thread.start()
         
         server_running = True
@@ -209,7 +189,6 @@ class MCP_PT_Panel(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         
-        # Server status
         if server_running:
             layout.label(text="Status: Running on port 8765", icon='PLAY')
             layout.operator("mcp.stop_server", icon='PAUSE')
@@ -217,19 +196,16 @@ class MCP_PT_Panel(bpy.types.Panel):
             layout.label(text="Status: Stopped", icon='PAUSE')
             layout.operator("mcp.start_server", icon='PLAY')
         
-        # Instructions
         box = layout.box()
         box.label(text="Instructions:")
         box.label(text="1. Click 'Start MCP Server'")
         box.label(text="2. Send JSON to localhost:8765")
         box.label(text="3. Check Blender console for logs")
         
-        # Example message format
         box = layout.box()
         box.label(text="Expected JSON format:")
         box.label(text='{"type": "code", "code": "..."}')
 
-# Registration
 classes = [
     MCP_OT_StartServer,
     MCP_OT_StopServer,
@@ -244,7 +220,6 @@ def register():
 def unregister():
     global socket_server, server_running
     
-    # Stop server if running
     if server_running and socket_server:
         socket_server.stop_server()
     
