@@ -27,7 +27,7 @@ class BlenderClient {
       }, 5000); // Reduced timeout
 
       client.on("connect", () => {
-        console.log("Connected to Blender");
+        // console.log("Connected to Blender");
         const message = JSON.stringify(messageObject);
 
         client.write(message);
@@ -36,7 +36,7 @@ class BlenderClient {
 
       client.on("data", (data) => {
         buffer += data.toString();
-        console.log("Received data from Blender:", data.toString());
+        // console.log("Received data from Blender:", data.toString());
 
         try {
           const response = JSON.parse(buffer);
@@ -46,7 +46,7 @@ class BlenderClient {
             resolve(response);
           }
         } catch (e) {
-          console.log("Incomplete JSON, waiting for more data");
+          // console.log("Incomplete JSON, waiting for more data");
         }
       });
 
@@ -60,7 +60,7 @@ class BlenderClient {
       });
 
       client.on("close", () => {
-        console.log("Connection closed by Blender");
+        // console.log("Connection closed by Blender");
         if (!resolved) {
           resolved = true;
           clearTimeout(timer);
@@ -167,7 +167,7 @@ server.tool("test-blender-connection", {}, async () => {
 
 server.tool("fetch-scene-from-blender", {}, async () => {
   try {
-    console.log("Fetching scene from Blender...");
+    // console.log("Fetching scene from Blender...");
     const response = await blenderClient.fetchScene();
 
     return {
@@ -199,7 +199,7 @@ server.tool("fetch-scene-from-blender", {}, async () => {
 async function init() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.log("MCP Server started - ready to communicate with Blender!");
+  // console.log("MCP Server started - ready to communicate with Blender!");
 }
 
 init().catch(console.error);

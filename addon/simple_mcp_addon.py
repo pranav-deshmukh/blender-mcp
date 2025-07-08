@@ -14,12 +14,14 @@ import threading
 import json
 import time
 import io
-from contextlib import redirect_stdout, suppress
+import traceback
+from contextlib import redirect_stdout, redirect_stderr, suppress
 
 socket_server = None
 server_running = False
 
 def getSceneInfo():
+    try:
         sceneInfo = {
             "scene_name":bpy.context.scene.name,
             "objects":[],
@@ -34,6 +36,9 @@ def getSceneInfo():
             }
             sceneInfo["objects"].append(obj_info)
         return sceneInfo;
+    except Exception as e:
+        print(f"Error getting scene info: {e}")
+        return {"error": str(e)}
 
 class SimpleMCPServer:
     def __init__(self, port=8765):
@@ -117,45 +122,61 @@ class SimpleMCPServer:
         print("=== MCP MESSAGE RECEIVED ===")
         print(f"Full message: {data}")
         
-        msg_type = data.get('type', 'unknown')
+        try:
+            msg_type = data.get('type', 'unknown')
+            if(msg_type == 'code'):
+                return self.execute_code(data.get('code', ''))
+            elif(msg_type == 'fetch-scene'):
+                return getSceneInfo()
+            else:
+                return {"status": "error", "error": "Unknown message type"}
+        except Exception as e:
+            print(f"Error processing message: {e}")
+            return {"status": "error", "error": str(e)}
         
+    def execute_code(self, code):
+        """Execute Python code with comprehensive error handling"""
+        if not code.strip():
+            return {"status": "error", "error": "NO code provided"}
         
-        if msg_type == 'code':
-            code = data.get('code', '')
-            print("Executing code...")
-            try:
-                exec_result=io.StringIO()
-                with redirect_stdout(exec_result):
-                    exec(code, {"bpy": bpy})
-                output = exec_result.getvalue()
-                print("Code executed successfully:", output)
+        print("Executing code...")
+        try:
+            stdout_capture = io.StringIO()
+            stderr_capture = io.StringIO()
+            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+                try:
+                    compiled_code = compile(code, "<mcp_code>", "exec")
+                    exec(compiled_code, {"bpy": bpy})
+                except Exception as e:
+                    print(f"Code execution error: {e}")
+                    return {
+                        "status": "error",
+                        "error": str(e),
+                        "message": "Code execution error",
+                    }
+            stdout_output = stdout_capture.getvalue()
+            stderr_output = stderr_capture.getvalue()
 
-                return {
-                    "status": "executed",
-                    "result": output,
-                }
-            except Exception as e:
-                print(f"Code execution error: {e}")
-                return {
-                    "status": "error",
-                    "error": str(e),
-                    "message": "Code execution error",
-                }
-        elif msg_type == 'fetch-scene':
-            try:
-                info = getSceneInfo()
-                return{
-                    "status": "success",
-                    "result": info,
-                }
-            except Exception as e:
-                print(f"Scene fetch error: {e}")
-                return {
-                    "status": "error",
-                    "error": str(e),
-                }
+            result = {
+                "status": "executed",
+                "result": stdout_output,
+            }
+            if stderr_output:
+                result["warnings"] = stderr_output
+            print("Code executed successfully:", stdout_output)
+            return result
+        except Exception as e:
+            error_msg = str(e)
+            traceback.print_exc()
+            print(f"Code execution error: {e}")
+            return {
+                "status": "error",
+                "error": error_msg,
+                "message": "Code execution error",
+                "traceback": traceback.format_exc(),
+            }
+        
 
-    
     def stop_server(self):
         """Stop the server"""
         self.running = False
