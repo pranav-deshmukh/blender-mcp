@@ -1,6 +1,6 @@
 bl_info = {
     "name": "Simple MCP Receiver",
-    "author": "Your Name",
+    "author": "MCP",
     "version": (1, 0, 0),
     "blender": (2, 80, 0),
     "location": "View3D > Sidebar > MCP",
