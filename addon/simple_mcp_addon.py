@@ -14,11 +14,15 @@ import threading
 import json
 import time
 import io
+import queue
 import traceback
 from contextlib import redirect_stdout, redirect_stderr, suppress
 
 socket_server = None
 server_running = False
+
+code_execution_queue = queue.Queue()
+
 
 def getSceneInfo():
     try:
@@ -39,6 +43,62 @@ def getSceneInfo():
     except Exception as e:
         print(f"Error getting scene info: {e}")
         return {"error": str(e)}
+    
+def execute_code_in_main_thread(code):
+    """Execute Python code with comprehensive error handling"""
+    if not code.strip():
+        return {"status": "error", "error": "NO code provided"}
+    print("Executing code...")
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
+    try:
+        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+            try:
+                compiled_code = compile(code, "<mcp_code>", "exec")
+                exec(compiled_code, {"bpy": bpy})
+            except Exception as e:
+                print(f"Code execution error: {e}")
+                return {
+                    "status": "error",
+                    "error": str(e),
+                    "message": "Code execution error",
+                }
+        stdout_output = stdout_capture.getvalue()
+        stderr_output = stderr_capture.getvalue()
+    
+        result = {
+            "status": "executed",
+            "result": stdout_output,
+        }
+        if stderr_output:
+            result["warnings"] = stderr_output
+        print("Code executed successfully:", stdout_output)
+        return result
+    except Exception as e:
+        error_msg = str(e)
+        traceback.print_exc()
+        print(f"Code execution error: {e}")
+        return {
+            "status": "error",
+            "error": error_msg,
+            "message": "Code execution error",
+            "traceback": traceback.format_exc(),
+        }
+
+def process_queue_timer():
+    """Timer function to process queued code execution tasks"""
+    try:
+        while not code_execution_queue.empty():
+            task = code_execution_queue.get_nowait()
+            if task["type"] == "code":
+                result = execute_code_in_main_thread(task["code"])
+                task["result"] = result
+                task["completed"] = True
+    except queue.Empty:
+        pass
+    except Exception as e:
+        print(f"Error processing code execution queue: {e}")
+    return 0.1
 
 class SimpleMCPServer:
     def __init__(self, port=8765):
@@ -125,7 +185,7 @@ class SimpleMCPServer:
         try:
             msg_type = data.get('type', 'unknown')
             if(msg_type == 'code'):
-                return self.execute_code(data.get('code', ''))
+                return self.execute_code_via_queue(data.get('code', ''))
             elif(msg_type == 'fetch-scene'):
                 return getSceneInfo()
             else:
@@ -134,47 +194,28 @@ class SimpleMCPServer:
             print(f"Error processing message: {e}")
             return {"status": "error", "error": str(e)}
         
-    def execute_code(self, code):
+    def execute_code_via_queue(self, code):
         """Execute Python code with comprehensive error handling"""
         if not code.strip():
             return {"status": "error", "error": "NO code provided"}
         
-        print("Executing code...")
-        try:
-            stdout_capture = io.StringIO()
-            stderr_capture = io.StringIO()
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                try:
-                    compiled_code = compile(code, "<mcp_code>", "exec")
-                    exec(compiled_code, {"bpy": bpy})
-                except Exception as e:
-                    print(f"Code execution error: {e}")
-                    return {
-                        "status": "error",
-                        "error": str(e),
-                        "message": "Code execution error",
-                    }
-            stdout_output = stdout_capture.getvalue()
-            stderr_output = stderr_capture.getvalue()
+        task = {
+            'type': 'code',
+            'code': code,
+            'completed': False,
+            'result': None
+        }
 
-            result = {
-                "status": "executed",
-                "result": stdout_output,
-            }
-            if stderr_output:
-                result["warnings"] = stderr_output
-            print("Code executed successfully:", stdout_output)
-            return result
-        except Exception as e:
-            error_msg = str(e)
-            traceback.print_exc()
-            print(f"Code execution error: {e}")
-            return {
-                "status": "error",
-                "error": error_msg,
-                "message": "Code execution error",
-                "traceback": traceback.format_exc(),
-            }
+        code_execution_queue.put(task)
+
+        timeout = 10.0
+        start_time = time.time()
+        while not task["completed"] and (time.time() - start_time) < timeout:
+            time.sleep(0.1)
+        if task["completed"]:
+            return task["result"]
+        else:
+            return {"status": "error", "error": "Code execution timed out"}
         
 
     def stop_server(self):
@@ -202,6 +243,9 @@ class MCP_OT_StartServer(bpy.types.Operator):
         server_thread = threading.Thread(target=socket_server.start_server)
         server_thread.daemon = True  
         server_thread.start()
+
+        if not bpy.app.timers.is_registered(process_queue_timer):
+            bpy.app.timers.register(process_queue_timer)
         
         server_running = True
         self.report({'INFO'}, "MCP Server started on port 8765")
@@ -223,6 +267,9 @@ class MCP_OT_StopServer(bpy.types.Operator):
         
         if socket_server:
             socket_server.stop_server()
+
+        if bpy.app.timers.is_registered(process_queue_timer):
+            bpy.app.timers.unregister(process_queue_timer)
         
         server_running = False
         self.report({'INFO'}, "MCP Server stopped")
@@ -273,6 +320,9 @@ def unregister():
     
     if server_running and socket_server:
         socket_server.stop_server()
+
+    if bpy.app.timers.is_registered(process_queue_timer):
+        bpy.app.timers.unregister(process_queue_timer)
     
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)
