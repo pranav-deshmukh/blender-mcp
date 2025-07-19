@@ -2,7 +2,7 @@ bl_info = {
     "name": "Simple MCP Receiver",
     "author": "MCP",
     "version": (1, 0, 0),
-    "blender": (2, 80, 0),
+    "blender": (4, 3, 0),
     "location": "View3D > Sidebar > MCP",
     "description": "Simple MCP code receiver via TCP socket",
     "category": "Development",
