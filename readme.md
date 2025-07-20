@@ -18,8 +18,8 @@
 1. Clone the repository
 
 ```bash
-git clone https://github.com/pranav-deshmukh/blender-mcp-demo.git
-cd blender-mcp-demo
+git clone https://github.com/pranav-deshmukh/blender-mcp.git
+cd blender-mcp
 ```
 
 2. Install Dependencies
