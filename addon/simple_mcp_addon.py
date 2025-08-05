@@ -16,6 +16,9 @@ import time
 import io
 import queue
 import traceback
+import urllib.request
+import os
+import tempfile
 from contextlib import redirect_stdout, redirect_stderr, suppress
 
 socket_server = None
@@ -43,6 +46,89 @@ def getSceneInfo():
     except Exception as e:
         print(f"Error getting scene info: {e}")
         return {"error": str(e)}
+
+
+def download_file(url, filepath):
+    """Download a file from a URL"""
+    try:
+        print(f"Downloading file from {url} to {filepath}")
+        urllib.request.urlretrieve(url, filepath)
+        print(f"File downloaded successfully:{filepath}")
+        return True
+    except Exception as e:
+        print(f"Error downloading file {url}: {e}")
+        return False
+
+def download_and_import_asset(asset_data):
+    """Download blend file and textures, then import into Blender"""
+    try:
+        asset_name = asset_data.get("asset_name")
+        blend_url = asset_data.get("blend_url")
+        includes = asset_data.get("includes", {})
+
+        if not blend_url:
+           return {"status": "error", "error": "No blend URL provided"}
+        
+        temp_dir = tempfile.mkdtemp(prefix=f"polyhaven_{asset_name}_")
+        print(f"creating temp dir: {temp_dir}")
+
+        blend_filename = f"{asset_name}.blend"
+        blend_filepath = os.path.join(temp_dir, blend_filename)
+
+        print(f"Downloading blend file from {blend_url} to {blend_filepath}")
+        if not download_file(blend_url, blend_filepath):
+            return {"status": "error", "error": "Failed to download blend file"}
+        
+        textures_dir = os.path.join(temp_dir, "textures")
+        os.makedirs(textures_dir, exist_ok=True)
+
+        downloaded_textures = [];
+        for texture_path, texture_info in includes.items():
+            texture_url = texture_info.get("url")
+            if(texture_url):
+                texture_filename = os.path.basename(texture_path)
+                texture_file_path = os.path.join(textures_dir, texture_filename)
+                print(f"Downloading texture {texture_filename} from {texture_url} to {texture_file_path}")
+                if download_file(texture_url, texture_file_path):
+                    downloaded_textures.append(texture_file_path)
+                else:
+                    return {"status": "error", "error": "Failed to download texture"}
+                
+        print(f"Importing blend file {blend_filepath}")
+        with bpy.data.libraries.load(blend_filepath) as (data_from, data_to):
+            data_to.objects = data_from.objects
+            data_to.materials = data_from.materials
+            data_to.meshes = data_from.meshes
+        
+        imported_objects = []
+        for obj in data_to.objects:
+            if obj:
+                bpy.context.collection.objects.link(obj)
+                imported_objects.append(obj.name)
+                print(f"Imported object: {obj.name}")
+        
+        
+        
+        return {
+            "status": "success",
+            "message": f"Asset '{asset_name}' imported successfully",
+            "details": {
+                "blend_file": blend_filepath,
+                "textures_downloaded": len(downloaded_textures),
+                "texture_files": downloaded_textures,
+                "imported_objects": imported_objects,
+                "temp_directory": temp_dir
+            }
+        }
+        
+    except Exception as e:
+        error_msg = f"Error importing asset: {str(e)}"
+        print(error_msg)
+        traceback.print_exc()
+        return {"status": "error", "error": error_msg}
+        
+
+
     
 def execute_code_in_main_thread(code):
     """Execute Python code with comprehensive error handling"""
@@ -92,6 +178,10 @@ def process_queue_timer():
             task = code_execution_queue.get_nowait()
             if task["type"] == "code":
                 result = execute_code_in_main_thread(task["code"])
+                task["result"] = result
+                task["completed"] = True
+            elif task["type"] == "download_asset":
+                result = download_and_import_asset(task["asset_data"])
                 task["result"] = result
                 task["completed"] = True
     except queue.Empty:
@@ -188,12 +278,38 @@ class SimpleMCPServer:
                 return self.execute_code_via_queue(data.get('code', ''))
             elif(msg_type == 'fetch-scene'):
                 return getSceneInfo()
+            elif(msg_type == 'asset-data'):
+                return self.handle_asset_data(data)
             else:
                 return {"status": "error", "error": "Unknown message type"}
         except Exception as e:
             print(f"Error processing message: {e}")
             return {"status": "error", "error": str(e)}
         
+    def handle_asset_data(self, data):
+        """Handle asset data received from Blender"""
+        try:
+            print(f"Received asset data: {data}")
+            task = {
+                'type': 'download_asset',
+                'asset_data': data,
+                'completed': False,
+                'result': None
+            }
+            code_execution_queue.put(task)
+        
+            timeout = 60.0
+            start_time = time.time()
+            while not task["completed"] and (time.time() - start_time) < timeout:
+                time.sleep(0.1)
+            if task["completed"]:
+                return task["result"]
+            else:
+                return {"status": "error", "error": "Asset download / import timed out"}
+        except Exception as e:
+            print(f"Error processing asset data: {e}")
+            return {"status": "error", "error": str(e)}
+
     def execute_code_via_queue(self, code):
         """Execute Python code with comprehensive error handling"""
         if not code.strip():
