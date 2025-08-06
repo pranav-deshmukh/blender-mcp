@@ -37,7 +37,7 @@ node index.js
 ## 🌐 Website & Usage Documentation
 
 Check out the live demo and documentation here:  
-🔗 [https://blender-mcp-psi.vercel.app/](https://blender-mcp-psi.vercel.app/)
+🔗 [https://blender-mcp-studio.vercel.app/](https://blender-mcp-studio.vercel.app/)
 
 ## 📝 License
 
